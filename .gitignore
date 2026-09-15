@@ -1,0 +1,14 @@
+# Compilación
+bin/
+obj/
+.vs/
+*.user
+
+# Base de datos local SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Archivos temporales de ofimática
+.~lock.*#
+~$*
