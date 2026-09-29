@@ -1,22 +1,49 @@
-using Microsoft.EntityFrameworkCore;
 using HeroesWeb.Data;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddRazorPages();
-
 // "Sqlite" o "SqlServer". Se elige en appsettings.json.
 var proveedor = builder.Configuration["DatabaseProvider"] ?? "SqlServer";
-var cadena = builder.Configuration.GetConnectionString("HeroesDb")
-    ?? throw new InvalidOperationException("Falta la conexión HeroesDb.");
+var connectionString = builder.Configuration.GetConnectionString("HeroesDb")
+    ?? throw new InvalidOperationException("No se encontró la conexión HeroesDb.");
 
-builder.Services.AddDbContext<HeroesContext>(options =>
+void Configurar(DbContextOptionsBuilder options)
 {
     if (proveedor.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
-        options.UseSqlite(cadena);
+        options.UseSqlite(connectionString);
     else
-        options.UseSqlServer(cadena);
+        options.UseSqlServer(connectionString);
+}
+
+// Las carpetas del CRUD exigen haber iniciado sesión.
+// El laboratorio de Tag Helpers queda abierto a propósito.
+builder.Services.AddRazorPages(options =>
+{
+    options.Conventions.AuthorizeFolder("/Heroes");
+    options.Conventions.AuthorizeFolder("/SuperPoderes");
 });
+
+builder.Services.AddDbContext<HeroesContext>(Configurar);
+builder.Services.AddDbContext<ApplicationDbContext>(Configurar);
+
+builder.Services
+    .AddDefaultIdentity<IdentityUser>(options =>
+    {
+        options.SignIn.RequireConfirmedAccount = false;
+
+        options.User.RequireUniqueEmail = true;
+
+        options.Password.RequiredLength = 8;
+        options.Password.RequireDigit = true;
+        options.Password.RequireLowercase = true;
+        options.Password.RequireUppercase = true;
+        options.Password.RequireNonAlphanumeric = true;
+    })
+    .AddEntityFrameworkStores<ApplicationDbContext>();
 
 var app = builder.Build();
 
@@ -38,6 +65,20 @@ if (proveedor.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
                 db.Database.ExecuteSqlRaw(soloInserts);
         }
     }
+    // Ambos contextos comparten el mismo archivo SQLite, así que EnsureCreated()
+    // no basta para el segundo: crea la base solo si aún no existe. Se piden
+    // explícitamente las tablas de Identity. En SQL Server esto lo hace la migración.
+    var identityDb = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    try
+    {
+        var creador = (RelationalDatabaseCreator)identityDb.Database
+            .GetService<IDatabaseCreator>();
+        creador.CreateTables();
+    }
+    catch (Exception)
+    {
+        // Las tablas de Identity ya existían.
+    }
 }
 
 if (!app.Environment.IsDevelopment())
@@ -48,7 +89,10 @@ if (!app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseRouting();
+
+app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapStaticAssets();
 app.MapRazorPages().WithStaticAssets();
 app.Run();
